@@ -1,0 +1,144 @@
+import sys
+import math
+from PyQt5.QtCore import Qt, QTimer, QPointF
+from PyQt5.QtGui import QPainter, QColor, QPen
+from PyQt5.QtWidgets import (
+    QApplication, QMainWindow, QWidget, QVBoxLayout, QFormLayout, 
+    QSlider, QLabel, QSpinBox, QPushButton
+)
+
+class ClockWidget(QWidget):
+    def __init__(self):
+        super().__init__()
+        self.init_hours = 12
+        self.init_minutes = 0
+        self.t = 0
+        self.k_sec = 1.0
+        self.k_min = 1.0
+        self.k_hour = 1.0
+        self.timer = QTimer(self)
+        self.timer.timeout.connect(self.update_time)
+        self.timer.start(50)
+
+    def set_initial_time(self, h, m):
+        self.init_hours = h % 12
+        self.init_minutes = m % 60
+        self.t = 0
+
+    def set_acceleration_factors(self, k_sec, k_min, k_hour):
+        self.k_sec = k_sec
+        self.k_min = k_min
+        self.k_hour = k_hour
+
+    def update_time(self):
+        self.t += 0.05
+        self.update()
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        w = self.width()
+        h = self.height()
+        center = QPointF(w/2, h/2)
+        painter.translate(center)
+        radius = min(w, h) / 2 * 0.9
+        int_radius = int(radius)
+        painter.setPen(QPen(Qt.black, 3))
+        painter.drawEllipse(QPointF(0, 0), radius, radius)
+        painter.setPen(Qt.black)
+        for i in range(60):
+            angle = i * 6
+            painter.save()
+            painter.rotate(angle)
+            if i % 5 == 0:
+                painter.setPen(QPen(Qt.black, 3))
+                painter.drawLine(0, -int_radius, 0, -int_radius+15)
+            else:
+                painter.setPen(QPen(Qt.black, 1))
+                painter.drawLine(0, -int_radius, 0, -int_radius+7)
+            painter.restore()
+        initial_hour_angle = (self.init_hours * 30) + (self.init_minutes * 0.5)
+        initial_minute_angle = self.init_minutes * 6
+        second_delta = 6 * self.k_sec * self.t
+        minute_delta = self.k_min * (self.t / 10)
+        hour_delta = self.k_hour * (self.t / 120)
+        hour_angle = (initial_hour_angle + hour_delta) % 360
+        minute_angle = (initial_minute_angle + minute_delta) % 360
+        second_angle = second_delta % 360
+        painter.save()
+        painter.rotate(hour_angle)
+        painter.setPen(QPen(Qt.black, 6))
+        painter.drawLine(0, 0, 0, int(-radius*0.5))
+        painter.restore()
+        painter.save()
+        painter.rotate(minute_angle)
+        painter.setPen(QPen(Qt.blue, 4))
+        painter.drawLine(0, 0, 0, int(-radius*0.7))
+        painter.restore()
+        painter.save()
+        painter.rotate(second_angle)
+        painter.setPen(QPen(Qt.red, 2))
+        painter.drawLine(0, 0, 0, int(-radius*0.9))
+        painter.restore()
+        painter.setBrush(Qt.black)
+        painter.setPen(Qt.black)
+        painter.drawEllipse(QPointF(0,0), 5, 5)
+
+class MainWindow(QMainWindow):
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("Clock Simulation")
+        self.clock = ClockWidget()
+        control_layout = QFormLayout()
+        self.hour_spin = QSpinBox()
+        self.hour_spin.setRange(0,23)
+        self.hour_spin.setValue(12)
+        self.minute_spin = QSpinBox()
+        self.minute_spin.setRange(0,59)
+        self.minute_spin.setValue(12)
+        control_layout.addRow("Initial Hours:", self.hour_spin)
+        control_layout.addRow("Initial Minutes:", self.minute_spin)
+        self.sec_slider = QSlider(Qt.Horizontal)
+        self.sec_slider.setRange(1,10)
+        self.sec_slider.setValue(1)
+        self.min_slider = QSlider(Qt.Horizontal)
+        self.min_slider.setRange(1,10)
+        self.min_slider.setValue(1)
+        self.hour_slider = QSlider(Qt.Horizontal)
+        self.hour_slider.setRange(1,10)
+        self.hour_slider.setValue(1)
+        control_layout.addRow("Seconds hand speed (k_sec):", self.sec_slider)
+        control_layout.addRow("Minutes hand speed (k_min):", self.min_slider)
+        control_layout.addRow("Hours hand speed (k_hour):", self.hour_slider)
+        self.restart_button = QPushButton("Restart")
+        self.restart_button.clicked.connect(self.restart_animation)
+        control_layout.addRow(self.restart_button)
+        main_layout = QVBoxLayout()
+        main_layout.addWidget(self.clock)
+        control_widget = QWidget()
+        control_widget.setLayout(control_layout)
+        main_layout.addWidget(control_widget)
+        container = QWidget()
+        container.setLayout(main_layout)
+        self.setCentralWidget(container)
+        self.sec_slider.valueChanged.connect(self.update_factors)
+        self.min_slider.valueChanged.connect(self.update_factors)
+        self.hour_slider.valueChanged.connect(self.update_factors)
+
+    def restart_animation(self):
+        h = self.hour_spin.value()
+        m = self.minute_spin.value()
+        self.clock.set_initial_time(h,m)
+
+    def update_factors(self):
+        k_sec = self.sec_slider.value()
+        k_min = self.min_slider.value()
+        k_hour = self.hour_slider.value()
+        self.clock.set_acceleration_factors(k_sec, k_min, k_hour)
+
+if __name__ == "__main__":
+    app = QApplication(sys.argv)
+    window = MainWindow()
+    window.resize(400, 500)
+    window.show()
+    sys.exit(app.exec_())
