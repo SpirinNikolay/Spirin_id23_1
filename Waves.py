@@ -1,45 +1,57 @@
 import sys
 import numpy as np
-from PyQt5.QtWidgets import QApplication, QMainWindow, QVBoxLayout, QWidget
-from PyQt5.QtGui import QPainter, QColor
-from PyQt5.QtCore import QTimer
-import json
+from PyQt5.QtWidgets import (
+    QApplication, QMainWindow, QVBoxLayout, QWidget, QSlider, QLabel, QPushButton, QSpinBox, QFormLayout, QDialog
+)
+from PyQt5.QtGui import QPainter, QColor, QMouseEvent
+from PyQt5.QtCore import QTimer, Qt
 
 WINDOW_WIDTH = 800
 WINDOW_HEIGHT = 600
 FPS = 60
 
-# Класс для описания волны
+# Класс волны
 class Wave:
     def __init__(self, amplitude, period, speed, offset):
         self.amplitude = amplitude
         self.period = period
         self.speed = speed
-        self.position = 0
+        self.position = 0 
         self.offset = offset
-
     def update(self):
         self.position += self.speed / FPS
 
     def get_y(self, x):
         return self.amplitude * np.sin((2 * np.pi / self.period) * (x - self.position)) + self.offset
 
-    def to_dict(self):
-        return {
-            "amplitude": self.amplitude,
-            "period": self.period,
-            "speed": self.speed,
-            "offset": self.offset
-        }
 
+# Класс поплавка
 class Buoy:
-    def __init__(self, wave):
+    def __init__(self, wave, mass=1, size=20):
         self.wave = wave
         self.x_position = np.random.randint(0, WINDOW_WIDTH)
         self.y_position = self.wave.get_y(self.x_position)
+        self.mass = mass
+        self.size = size
+        self.radius = self.size
+        self.velocity_y = 0
+        self.velocity_x = 2
+        self.buoyancy_strength = 0.1
 
     def update(self):
-        self.y_position = self.wave.get_y(self.x_position)
+        wave_y = self.wave.get_y(self.x_position)
+        buoyancy_force = (wave_y - self.y_position) * self.buoyancy_strength
+        damping = -self.velocity_y * 0.02
+        self.velocity_y += (buoyancy_force + damping) / self.mass
+        max_speed = 5 / (self.mass ** 0.5)
+        self.velocity_y = np.clip(self.velocity_y, -max_speed, max_speed)
+        self.y_position += self.velocity_y
+        self.x_position += self.velocity_x
+        if self.x_position > WINDOW_WIDTH:
+            self.x_position = 0
+
+    def contains(self, x, y):
+        return (x - self.x_position) ** 2 + (y - self.y_position) ** 2 <= self.radius ** 2
 
 class WaveSimulation(QMainWindow):
     def __init__(self):
@@ -51,34 +63,108 @@ class WaveSimulation(QMainWindow):
             Wave(amplitude=80, period=150, speed=10, offset=WINDOW_HEIGHT / 4),
             Wave(amplitude=60, period=120, speed=10, offset=WINDOW_HEIGHT / 2),
             Wave(amplitude=40, period=90, speed=20, offset=3 * WINDOW_HEIGHT / 4),
-            Wave(amplitude=20, period=60, speed=25, offset=WINDOW_HEIGHT)
         ]
-
         self.buoys = [Buoy(wave) for wave in self.waves]
-
+        self.paused = False
         self.timer = QTimer()
         self.timer.timeout.connect(self.update_simulation)
         self.timer.start(1000 // FPS)
-
-        # Преобразование волн в словари для сохранения в JSON
-        data = {"waves": [wave.to_dict() for wave in self.waves]}
-
-        with open('waves.json', 'w') as json_file:
-            json.dump(data, json_file, indent=4)
+        self.initUI()
 
     def update_simulation(self):
-        for wave in self.waves:
-            wave.update()
-        for buoy in self.buoys:
-            buoy.update()
+        if not self.paused:
+            for wave in self.waves:
+                wave.update()
+            for buoy in self.buoys:
+                buoy.update()
         self.update()
+
+    def initUI(self):
+        layout = QVBoxLayout()
+        self.amplitude_slider = self.create_slider(1, 200, 80, "Amplitude")
+        self.period_slider = self.create_slider(50, 300, 150, "Period")
+        self.speed_slider = self.create_slider(1, 100, 10, "Speed")
+
+        self.add_wave_button = QPushButton("Add Wave")
+        self.add_wave_button.clicked.connect(self.add_wave)
+
+        self.remove_wave_button = QPushButton("Remove Wave")
+        self.remove_wave_button.clicked.connect(self.remove_wave)
+
+        self.pause_button = QPushButton("Pause")
+        self.pause_button.clicked.connect(self.toggle_pause)
+
+        layout.addWidget(self.amplitude_slider)
+        layout.addWidget(self.period_slider)
+        layout.addWidget(self.speed_slider)
+        layout.addWidget(self.add_wave_button)
+        layout.addWidget(self.remove_wave_button)
+        layout.addWidget(self.pause_button)
+
+        self.amplitude_label = QLabel(f"Amplitude: {self.amplitude_slider.value()}")
+        self.period_label = QLabel(f"Period: {self.period_slider.value()}")
+        self.speed_label = QLabel(f"Speed: {self.speed_slider.value()}")
+
+        layout.addWidget(self.amplitude_label)
+        layout.addWidget(self.period_label)
+        layout.addWidget(self.speed_label)
+
+        self.amplitude_slider.valueChanged.connect(self.update_wave_parameters)
+        self.period_slider.valueChanged.connect(self.update_wave_parameters)
+        self.speed_slider.valueChanged.connect(self.update_wave_parameters)
+
+        container = QWidget()
+        container.setLayout(layout)
+        self.setCentralWidget(container)
+
+    def toggle_pause(self):
+        if self.paused:
+            self.paused = False
+            self.pause_button.setText("Pause")
+        else:
+            self.paused = True
+            self.pause_button.setText("Resume")
+
+    def create_slider(self, min_value, max_value, initial_value, label):
+        slider = QSlider(Qt.Horizontal)
+        slider.setMinimum(min_value)
+        slider.setMaximum(max_value)
+        slider.setValue(initial_value)
+        return slider
+
+    def update_wave_parameters(self):
+        """Обновляем параметры всех волн"""
+        for wave in self.waves:
+            wave.amplitude = self.amplitude_slider.value()
+            wave.period = self.period_slider.value()
+            wave.speed = self.speed_slider.value()
+
+        # Обновляем метки
+        self.amplitude_label.setText(f"Amplitude: {self.amplitude_slider.value()}")
+        self.period_label.setText(f"Period: {self.period_slider.value()}")
+        self.speed_label.setText(f"Speed: {self.speed_slider.value()}")
+
+    def add_wave(self):
+        offset = (len(self.waves) + 1) * (WINDOW_HEIGHT / 5)
+        new_wave = Wave(amplitude=50, period=100, speed=15, offset=offset)
+        self.waves.append(new_wave)
+        self.buoys.append(Buoy(new_wave))
+        self.update()
+
+    def remove_wave(self):
+        if self.waves:
+            self.waves.pop()
+            self.buoys.pop()
+            self.update()
 
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
 
-        colors = [QColor(0, 0, 255), QColor(0, 255, 0), QColor(255, 0, 0), QColor(255, 255, 0)]
+        # Цвета волн
+        colors = [QColor(0, 0, 255), QColor(0, 255, 0), QColor(255, 0, 0)]
 
+        # Рисуем волны
         for i, wave in enumerate(self.waves):
             painter.setPen(colors[i % len(colors)])
             last_y = int(wave.get_y(0))
@@ -87,11 +173,46 @@ class WaveSimulation(QMainWindow):
                 painter.drawLine(x - 1, last_y, x, y)
                 last_y = y
 
+        # Рисуем поплавки
         for buoy in self.buoys:
             painter.setBrush(QColor(255, 165, 0))
-            painter.drawEllipse(buoy.x_position - 5, int(buoy.y_position) - 5, 10, 10)
+            painter.drawEllipse(buoy.x_position - buoy.radius, int(buoy.y_position) - buoy.radius, 2 * buoy.radius, 2 * buoy.radius)
 
-if __name__ == '__main__':
+    def mousePressEvent(self, event: QMouseEvent):
+        """Обрабатываем клики по поплавкам"""
+        if event.button() == Qt.LeftButton:
+            for buoy in self.buoys:
+                if buoy.contains(event.x(), event.y()):
+                    self.edit_buoy_properties(buoy)
+                    break
+
+    def edit_buoy_properties(self, buoy):
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Edit Buoy Properties")
+        form_layout = QFormLayout()
+
+        mass_spinbox = QSpinBox()
+        mass_spinbox.setValue(buoy.mass)
+        form_layout.addRow("Mass:", mass_spinbox)
+
+        size_spinbox = QSpinBox()
+        size_spinbox.setValue(buoy.size)
+        form_layout.addRow("Size:", size_spinbox)
+
+        def save_changes():
+            buoy.mass = mass_spinbox.value()
+            buoy.size = size_spinbox.value()
+            buoy.radius = buoy.size
+            dialog.accept()
+
+        save_button = QPushButton("Save")
+        save_button.clicked.connect(save_changes)
+        form_layout.addRow(save_button)
+        dialog.setLayout(form_layout)
+        dialog.exec_()
+
+
+if __name__ == "__main__":
     app = QApplication(sys.argv)
     window = WaveSimulation()
     window.show()
